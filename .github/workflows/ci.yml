@@ -1,0 +1,52 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request: 
+    branches: [ "main" ]
+
+jobs:
+  build-dotnet:
+    name: Build .NET
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Setup .NET 10
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+    - name: Build .NET Solution
+      run: dotnet build IoT-Pipeline.slnx -c Release
+
+  build-api-image:
+    name: Build API Docker
+    needs: build-dotnet
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Build API Image
+      run: docker build -t mkocik/iot-api:ci-test ./src/IngestionApi
+      
+  build-worker-image:
+    name: Build Worker Docker
+    needs: build-dotnet
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Build Worker Image
+      run: docker build -t mkocik/iot-worker:ci-test ./src/DataWorker
+
+  deploy-dev:
+    name: Deploy to Dev
+    needs: [build-api-image, build-api-image]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Simulate Kubernetes Deployment
+      run: |
+        echo "Implementing YAML manifests on k8s cluster..."
+        sleep 3
+        echo "Application implemented succesfully"
