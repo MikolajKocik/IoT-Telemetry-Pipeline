@@ -68,6 +68,7 @@ The architecture was validated using a custom load generator to simulate a DDoS-
 - **Docker** — Multi-stage builds
 - **Kubernetes** — Deployments, Services, HPA, Metrics Server
 - **Redis** — StackExchange.Redis
+- **Github actions** - CI/CD
 
 ---
 
