@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DataWorker/DataWorker.csproj" />
+    <Project Path="src/IngestionApi/IngestionApi.csproj" />
+    <Project Path="src/SensorSimulator/SensorSimulator.csproj" />
+  </Folder>
+</Solution>
