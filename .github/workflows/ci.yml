@@ -67,12 +67,13 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    - name: Install kubectl
+    - name: Install kubeval
       run: |
-        curl -LO "https://dl.k8s.io/release/v1.32.0/bin/linux/amd64/kubectl"
-        chmod +x kubectl
+        curl -sL https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz | tar xz
+        sudo mv kubeval /usr/local/bin/
     - name: Validate all manifests
       run: |
         for f in k8s-manifests/*.yaml; do
-          ./kubectl apply --dry-run=client --validate=false -f "$f"
+          echo "Validating $f..."
+          kubeval "$f" || exit 1
         done
