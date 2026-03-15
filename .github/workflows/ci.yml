@@ -3,7 +3,7 @@ name: CI Pipeline
 on:
   push:
     branches: [ "main" ]
-  pull_request: 
+  pull_request:
     branches: [ "main" ]
 
 jobs:
@@ -27,9 +27,9 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    - name: Build API Image
-      run: docker build -t mkocik/iot-api:ci-test ./src/IngestionApi
-      
+    - name: Build API image
+      run: docker build -t mkocik/iot-ingestion-api:v1.0 ./src/IngestionApi
+
   build-worker-image:
     name: Build Worker Docker
     needs: build-dotnet
@@ -37,16 +37,42 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    - name: Build Worker Image
-      run: docker build -t mkocik/iot-worker:ci-test ./src/DataWorker
+    - name: Build Worker image
+      run: docker build -t mkocik/iot-data-worker:v1.0 ./src/DataWorker
 
-  deploy-dev:
-    name: Deploy to Dev
-    needs: [build-api-image, build-api-image]
+  build-gateway-image:
+    name: Build TCP/UDP Gateway Docker
+    needs: build-dotnet
     runs-on: ubuntu-latest
     steps:
-    - name: Simulate Kubernetes Deployment
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Build Gateway image
+      run: docker build -t mkocik/iot-tcp-udp-gateway:v1.0 ./src/TcpUdpGateway
+
+  build-wshub-image:
+    name: Build WsHub Docker
+    needs: build-dotnet
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Build WsHub image
+      run: docker build -t mkocik/iot-ws-hub:v1.0 ./src/WsHub
+
+  validate-manifests:
+    name: Validate k8s manifests
+    needs: [build-api-image, build-worker-image, build-gateway-image, build-wshub-image]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    - name: Install kubectl
       run: |
-        echo "Implementing YAML manifests on k8s cluster..."
-        sleep 3
-        echo "Application implemented succesfully"
+        curl -LO "https://dl.k8s.io/release/v1.32.0/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+    - name: Validate all manifests
+      run: |
+        for f in k8s-manifests/*.yaml; do
+          ./kubectl apply --dry-run=client --validate=false -f "$f"
+        done
