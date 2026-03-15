@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tcp-udp-gateway-deployment
+  labels:
+    app: tcp-udp-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: tcp-udp-gateway
+  template:
+    metadata:
+      labels:
+        app: tcp-udp-gateway
+    spec:
+      containers:
+      - name: gateway
+        image: mkocik/iot-tcp-udp-gateway:v1.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: tcp-sensors
+          containerPort: 9000
+          protocol: TCP
+        - name: udp-sensors
+          containerPort: 9001
+          protocol: UDP
+        envFrom:
+        - configMapRef:
+            name: iot-config
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "64Mi"
+          limits:
+            cpu: "250m"
+            memory: "128Mi"
+        livenessProbe:
+          tcpSocket:
+            port: 9000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 3
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: tcp-udp-gateway-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: tcp-udp-gateway
+  ports:
+  - name: tcp-sensors
+    port: 9000
+    targetPort: 9000
+    protocol: TCP
+  - name: udp-sensors
+    port: 9001
+    targetPort: 9001
+    protocol: UDP
