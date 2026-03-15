@@ -2,6 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ingestion-api-deployment
+  labels:
+    app: ingestion-api
+    version: v1
 spec:
   replicas: 2
   selector:
@@ -15,12 +18,17 @@ spec:
       containers:
       - name: api
         image: mkocik/iot-ingestion-api:v1.0
-        imagePullPolicy: Never
+        imagePullPolicy: IfNotPresent
+        
         ports:
         - containerPort: 8080
-        env:
-        - name: REDIS_CONNECTION
-          value: "redis-service:6379"
+
+        envFrom:
+        - configMapRef:
+            name: iot-config
+        - secretRef:
+            name: iot-secret
+
         resources:
           requests:
             cpu: "100m"
@@ -28,11 +36,21 @@ spec:
           limits:
             cpu: "250m"
             memory: "256Mi"
+
         livenessProbe:
           tcpSocket:
             port: 8080
-          initialDelaySeconds: 5
+          initialDelaySeconds: 10
           periodSeconds: 10
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 3
 
 ---
 
@@ -41,11 +59,9 @@ kind: Service
 metadata:
   name: ingestion-api-service
 spec:
-  type: NodePort
+  type: ClusterIP
   selector:
     app: ingestion-api
   ports:
   - port: 80
     targetPort: 8080
-    nodePort: 30000
-
