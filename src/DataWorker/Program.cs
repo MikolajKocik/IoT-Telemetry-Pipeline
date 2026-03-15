@@ -1,48 +1,24 @@
 using StackExchange.Redis;
+using DataWorker.Workers;
+using DataWorker.Workers.RabbitMq;
 
 var builder = Host.CreateApplicationBuilder(args);
 
-var redisConnectionString = builder.Configuration["REDIS_CONNECTION"] ?? "localhost:6379";
+var redisCs = builder.Configuration["REDIS_CONNECTION"] ?? "localhost:6379";
+var redisCfg = ConfigurationOptions.Parse(redisCs);
+redisCfg.AbortOnConnectFail = false;
+redisCfg.ConnectRetry = 5;
+redisCfg.ConnectTimeout = 5000;
+redisCfg.ReconnectRetryPolicy = new ExponentialRetry(1000);
 
-builder.Services.AddSingleton<IConnectionMultiplexer>(ConnectionMultiplexer.Connect(redisConnectionString));
+builder.Services.AddSingleton<IConnectionMultiplexer>(
+    ConnectionMultiplexer.Connect(redisCfg));
+
+builder.Services.AddSingleton<OutboxStore>();
+builder.Services.AddSingleton<RabbitMqPublisher>();
+
 builder.Services.AddHostedService<TelemetryWorker>();
+builder.Services.AddHostedService<OutboxRelay>();
 
 var host = builder.Build();
 host.Run();
-
-public class TelemetryWorker : BackgroundService
-{
-    private readonly IConnectionMultiplexer _redis;
-    private readonly ILogger<TelemetryWorker> _logger;
-    
-    public TelemetryWorker(IConnectionMultiplexer redis, ILogger<TelemetryWorker> logger)
-    {
-        _redis = redis;
-        _logger = logger;
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        _logger.LogInformation("Ready to work");
-    
-        var db = _redis.GetDatabase();
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            var message = await db.ListRightPopAsync("sensor-data");
-
-            if (!message.IsNull)
-            {
-                _logger.LogWarning($"[TASK LOADED] Analyze data from sensor: {message}");
-
-                await Task.Delay(2000, stoppingToken);
-
-                _logger.LogInformation("[TASK ENDED] Waiting for next ...\n");
-            }
-            else
-            {
-                await Task.Delay(500, stoppingToken);
-            }
-        }
-    }
-}
