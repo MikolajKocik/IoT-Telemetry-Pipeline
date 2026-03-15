@@ -25,7 +25,7 @@ This project solves that with a layered architecture where no component ever blo
 ## Architecture
 
 ```mermaid
-graph LR
+graph TD
     subgraph Devices
         A1[HTTP sensors]
         A2[TCP/UDP devices]
@@ -51,8 +51,8 @@ graph LR
         WS[WS Hub x2]
     end
 
-    A1 -->|HTTP POST /api/telemetry| NG
-    A2 -->|TCP :9000 / UDP :9001| GW
+    A1 -->|HTTP POST| NG
+    A2 -->|TCP :9000 UDP :9001| GW
     A3 -->|ws://iot.local/ws/live| NG
 
     NG --> API
@@ -66,7 +66,16 @@ graph LR
     OB -->|publish + mark sent| MQ
     W -->|PUBLISH sensor-live| R
     R -->|Pub/Sub| WS
-    WS -->|WebSocket frames| A3
+    WS -->|frames| A3
+
+    style NG fill:#1565c0,color:#fff
+    style API fill:#1e88e5,color:#fff
+    style GW fill:#1e88e5,color:#fff
+    style R  fill:#c62828,color:#fff
+    style W  fill:#2e7d32,color:#fff
+    style OB fill:#2e7d32,color:#fff
+    style MQ fill:#e65100,color:#fff
+    style WS fill:#6a1b9a,color:#fff
 ```
 
 ---
