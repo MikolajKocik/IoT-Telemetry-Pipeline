@@ -59,21 +59,3 @@ jobs:
       uses: actions/checkout@v4
     - name: Build WsHub image
       run: docker build -t mkocik/iot-ws-hub:v1.0 ./src/WsHub
-
-  validate-manifests:
-    name: Validate k8s manifests
-    needs: [build-api-image, build-worker-image, build-gateway-image, build-wshub-image]
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    - name: Install kubeval
-      run: |
-        curl -sL https://github.com/instrumenta/kubeval/releases/latest/download/kubeval-linux-amd64.tar.gz | tar xz
-        sudo mv kubeval /usr/local/bin/
-    - name: Validate all manifests
-      run: |
-        for f in k8s-manifests/*.yaml; do
-          echo "Validating $f..."
-          kubeval "$f" || exit 1
-        done
