@@ -1,6 +1,7 @@
 using System.Net.WebSockets;
 using System.Text;
 using StackExchange.Redis;
+using src.WsHub;
 
 var builder = WebApplication.CreateBuilder(args);
 
