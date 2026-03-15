@@ -1,0 +1,73 @@
+# WebSocket Hub Deployment
+#
+# Each pod holds a set of active browser connections in memory (ConnectionManager).
+# Multiple pods are safe because Redis Pub/Sub distributes messages to ALL pods —
+# every pod gets every processed event and fans it out to its local connections.
+#
+# Scaling note: you CAN scale this horizontally without any code changes.
+# The Redis Pub/Sub fan-out handles cross-pod delivery automatically.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ws-hub-deployment
+  labels:
+    app: ws-hub
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ws-hub
+  template:
+    metadata:
+      labels:
+        app: ws-hub
+    spec:
+      containers:
+      - name: ws-hub
+        image: mkocik/iot-ws-hub:v1.0
+        imagePullPolicy: IfNotPresent
+
+        ports:
+        - containerPort: 8080
+
+        envFrom:
+        - configMapRef:
+            name: iot-config
+
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "64Mi"
+          limits:
+            cpu: "250m"
+            memory: "128Mi"
+
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+
+# ClusterIP — NGINX Ingress routes /ws/* to this service.
+# The WebSocket Upgrade annotation in ingress.yaml handles the protocol switch.
+apiVersion: v1
+kind: Service
+metadata:
+  name: ws-hub-service
+spec:
+  type: ClusterIP
+  selector:
+    app: ws-hub
+  ports:
+  - port: 80
+    targetPort: 8080
