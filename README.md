@@ -1,62 +1,96 @@
 # IoT Telemetry Pipeline
 
-A high-throughput, asynchronous event processing pipeline built with .NET 10, Redis, and Kubernetes. Designed to handle massive spikes in IoT sensor traffic without data loss or system failure.
+A production-grade IoT data pipeline built with .NET 10 and Kubernetes. Designed to ingest high-frequency sensor data from multiple protocols, process it asynchronously, and stream results to connected browsers in real time — without data loss under any traffic conditions.
 
 ---
 
 ## The Problem It Solves
 
-In traditional synchronous architectures, a massive spike in incoming IoT sensor data (e.g., thousands of devices reconnecting simultaneously after a network outage) directly hits a relational database. This leads to:
+When thousands of IoT devices reconnect simultaneously after a network outage, a traditional synchronous architecture collapses:
 
-1. Database locking and connection pool exhaustion.
-2. Thread starvation on the API level.
-3. HTTP 504 Gateway Timeouts and ultimately, permanent data loss.
+1. The API blocks waiting for the database to confirm each write.
+2. Thread pool exhausts — new requests queue up and time out.
+3. HTTP 504 errors start appearing. Data is permanently lost.
 
-**The Solution:** This project implements a **Producer-Consumer** pattern using an in-memory Message Broker (Redis) as a shock absorber. The API (Producer) instantly offloads the payload to Redis and returns an HTTP response in milliseconds. A background service (Consumer) processes the queue at its own pace. If the incoming traffic exceeds CPU thresholds, the Kubernetes Horizontal Pod Autoscaler (HPA) automatically provisions additional API instances to absorb the load.
+This project solves that with a layered architecture where no component ever blocks another:
+
+- The **Ingestion API** accepts a sensor payload, pushes it to Redis, and returns HTTP 202 in under 1ms — it never touches a database.
+- The **Data Worker** processes messages from Redis at its own pace, completely decoupled from inbound traffic.
+- If inbound traffic spikes beyond CPU capacity, **Kubernetes HPA** automatically scales the Ingestion API from 2 to 10 pods.
+- After processing, every event is written to an **outbox table** before being published to RabbitMQ — so even if the broker goes down, no event is ever lost.
+- Processed events are broadcast over **Redis Pub/Sub** to all WebSocket hub pods, which stream them live to connected browsers.
 
 ---
 
-## Architecture Overview
+## Architecture
 
 ```mermaid
 graph LR
-    A[IoT Sensors / Simulator] -->|HTTP POST| B(K8s Service: NodePort)
-    B --> C[Ingestion API .NET]
-    C -->|LPUSH / JSON| D[(Redis Broker)]
-    D -->|RPOP / FIFO| E[Data Worker .NET]
-
-    subgraph K8s Cluster
-    B
-    C
-    D
-    E
+    subgraph Devices
+        A1[HTTP sensors]
+        A2[TCP/UDP devices]
+        A3[Browser]
     end
 
-    style C fill:#1e88e5,stroke:#0d47a1,stroke-width:2px,color:#fff
-    style D fill:#e53935,stroke:#b71c1c,stroke-width:2px,color:#fff
-    style E fill:#43a047,stroke:#1b5e20,stroke-width:2px,color:#fff
+    subgraph K8s Cluster
+        NG[NGINX Ingress]
+
+        subgraph Ingestion
+            API[Ingestion API x2-10]
+            GW[TCP/UDP Gateway x2]
+        end
+
+        R[(Redis)]
+
+        subgraph Processing
+            W[Data Worker]
+            OB[(Outbox SQLite)]
+        end
+
+        MQ[(RabbitMQ)]
+        WS[WS Hub x2]
+    end
+
+    A1 -->|HTTP POST /api/telemetry| NG
+    A2 -->|TCP :9000 / UDP :9001| GW
+    A3 -->|ws://iot.local/ws/live| NG
+
+    NG --> API
+    NG --> WS
+
+    API -->|LPUSH sensor-data| R
+    GW -->|LPUSH sensor-data| R
+
+    R -->|RPOP| W
+    W -->|INSERT| OB
+    OB -->|publish + mark sent| MQ
+    W -->|PUBLISH sensor-live| R
+    R -->|Pub/Sub| WS
+    WS -->|WebSocket frames| A3
 ```
 
 ---
 
 ## Components
 
-|   | Component | Role |
+| # | Component | Role |
 |---|-----------|------|
-| 1 | **Ingestion API** (Producer) | A lightweight .NET Minimal API that receives telemetry data and queues it in Redis. Scales dynamically via K8s HPA. |
-| 2 | **Redis** (Message Broker) | Acts as an in-memory buffer, preventing database overload during traffic spikes. |
-| 3 | **Data Worker** (Consumer) | A background .NET Hosted Service that asynchronously pops and processes messages from the Redis queue. |
-| 4 | **Sensor Simulator** | A multi-threaded C# console application used for load testing the cluster. |
+| 1 | **Ingestion API** | .NET Minimal API. Accepts HTTP sensor payloads, pushes to Redis. Scales 2→10 via HPA. |
+| 2 | **TCP/UDP Gateway** | .NET Worker Service. Opens raw TCP :9000 and UDP :9001 listeners. Pushes to the same Redis queue. |
+| 3 | **Redis** | In-memory buffer (LPUSH/RPOP queue) and Pub/Sub broker for WebSocket fan-out. |
+| 4 | **Data Worker** | .NET Worker Service. Pops from Redis, processes each message, writes outbox row, publishes to Pub/Sub. |
+| 5 | **Outbox + RabbitMQ** | SQLite outbox table guarantees at-least-once delivery to RabbitMQ even if the broker is temporarily down. |
+| 6 | **WebSocket Hub** | .NET Minimal API. Browsers connect via `ws://iot.local/ws/live` and receive processed events in real time. Uses `System.Threading.Channels` per connection for backpressure. |
+| 7 | **NGINX Ingress** | Single entry point. Routes HTTP, WebSocket (Upgrade header), and RabbitMQ management UI. |
+| 8 | **Sensor Simulator** | Multi-threaded C# console app. Fires 100 parallel sensors to load test HPA autoscaling. |
 
 ---
 
-## Load Testing & Autoscaling (HPA)
+## Load Test Results
 
-The architecture was validated using a custom load generator to simulate a DDoS-like traffic spike:
-
-- **Load:** Over 480,000 requests fired at the cluster in a matter of minutes.
-- **Autoscaling:** Kubernetes HPA detected CPU utilization spikes (>50%) and automatically scaled the Ingestion API from **2 to 10 Pods**.
-- **Result:** **0 dropped requests.** All data was safely buffered in Redis, waiting for the Workers to process them sequentially.
+- **Load:** 480,000+ requests in a few minutes
+- **Autoscaling:** HPA scaled Ingestion API from 2 → 10 pods at >50% CPU
+- **Result:** 0 dropped requests — all data buffered in Redis
 
 ![HPA Load Test](docs/k8s.png)
 
@@ -64,40 +98,89 @@ The architecture was validated using a custom load generator to simulate a DDoS-
 
 ## Technologies
 
-- **C# / .NET 10** — Minimal APIs, Worker Services
-- **Docker** — Multi-stage builds
-- **Kubernetes** — Deployments, Services, HPA, Metrics Server
-- **Redis** — StackExchange.Redis
-- **Github actions** - CI/CD
+- **C# / .NET 10** — Minimal APIs, Worker Services, BackgroundService, System.Threading.Channels
+- **Docker** — multi-stage builds
+- **Kubernetes (minikube)** — Deployments, Services, HPA, ConfigMap, Ingress, PVC
+- **Redis** — StackExchange.Redis, LPUSH/RPOP queue, Pub/Sub
+- **RabbitMQ** — direct exchange, durable queues, outbox pattern
+- **NGINX Ingress** — HTTP routing, WebSocket upgrade
+- **GitHub Actions** — CI: build + validate manifests
 
 ---
 
 ## How to Run Locally
 
-### 1. Start Minikube & Enable Metrics Server
+### 1. Start minikube
 
 ```bash
 minikube start
 minikube addons enable metrics-server
+minikube addons enable ingress
 ```
 
-### 2. Deploy the Infrastructure
+### 2. Add local DNS
+
+```bash
+echo "$(minikube ip)  iot.local" | sudo tee -a /etc/hosts
+```
+
+### 3. Create the Secret
+
+```bash
+kubectl create secret generic iot-secret \
+  --from-literal=REDIS_CONNECTION="redis-service.default.svc.cluster.local:6379"
+```
+
+### 4. Build and load images
+
+```bash
+docker build -t mkocik/iot-ingestion-api:v1.0    ./src/IngestionApi
+docker build -t mkocik/iot-data-worker:v1.0      ./src/DataWorker
+docker build -t mkocik/iot-tcp-udp-gateway:v1.0  ./src/TcpUdpGateway
+docker build -t mkocik/iot-ws-hub:v1.0           ./src/WsHub
+
+minikube image load mkocik/iot-ingestion-api:v1.0
+minikube image load mkocik/iot-data-worker:v1.0
+minikube image load mkocik/iot-tcp-udp-gateway:v1.0
+minikube image load mkocik/iot-ws-hub:v1.0
+```
+
+### 5. Deploy
 
 ```bash
 kubectl apply -f k8s-manifests/
 ```
 
-### 3. Open the API Tunnel
+### 6. Test HTTP ingestion
 
 ```bash
-minikube service ingestion-api-service
+curl -X POST http://iot.local/api/telemetry \
+  -H "Content-Type: application/json" \
+  -d '{"SensorId":"sensor-01","Temperature":42,"Timestamp":"2025-01-01T00:00:00Z"}'
 ```
 
-### 4. Start the Load Test
-
-Update the API URL in `src/SensorSimulator/Program.cs` with the tunnel address, then run:
+### 7. Test TCP ingestion
 
 ```bash
-cd src/SensorSimulator
-dotnet run
+minikube tunnel  # run in a separate terminal
+
+echo '{"SensorId":"plc-01","Temperature":55,"Timestamp":"2025-01-01T00:00:00Z"}' \
+  | nc 127.0.0.1 9000
 ```
+
+### 8. Open WebSocket live feed
+
+Open `docs/ws-test-client.html` in a browser and click Connect.
+
+### 9. Load test + watch HPA
+
+```bash
+cd src/SensorSimulator && dotnet run
+
+# in another terminal
+kubectl get hpa ingestion-api-hpa --watch
+```
+
+### 10. RabbitMQ management UI
+
+Open [http://iot.local/rabbitmq](http://iot.local/rabbitmq) — login: `guest / guest`
