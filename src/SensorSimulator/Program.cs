@@ -1,15 +1,16 @@
 ﻿using System.Text;
 
-string apiUrl = "http://192.168.49.2:30000/api/telemetry";
-using var client = new HttpClient();
+string apiUrl = "http://iot.local/api/telemetry";
 
+using var client = new HttpClient();
 var random = new Random();
 int requestCount = 0;
 
-Parallel.For(0, 100, new ParallelOptions
-{
-    MaxDegreeOfParallelism = 20
-}, async (i) =>
+Parallel.For(0, 100, new ParallelOptions 
+{ 
+    MaxDegreeOfParallelism = 20 
+},
+async (i) =>
 {
     while (true)
     {
@@ -26,12 +27,10 @@ Parallel.For(0, 100, new ParallelOptions
         try
         {
             HttpResponseMessage response = await client.PostAsync(apiUrl, content);
-            int currentCount = Interlocked.Increment(ref requestCount);
+            int count = Interlocked.Increment(ref requestCount);
 
-            if (currentCount % 100 == 0)
-            {
-                Console.WriteLine($"Send {currentCount} queries. Status: {response.StatusCode}");
-            }
+            if (count % 100 == 0)
+                Console.WriteLine($"Sent {count} requests. Last status: {response.StatusCode}");
         }
         catch (Exception ex)
         {
