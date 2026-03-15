@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>IoT Live Feed</title>
+  <style>
+    body { font-family: monospace; background: #0d1117; color: #c9d1d9; padding: 24px; }
+    h2   { color: #58a6ff; margin: 0 0 8px; }
+    #status { margin-bottom: 16px; font-size: 13px; }
+    .ok   { color: #3fb950; }
+    .err  { color: #f85149; }
+    .wait { color: #d29922; }
+    #log  { border: 1px solid #30363d; border-radius: 6px; padding: 12px;
+            height: 400px; overflow-y: auto; font-size: 12px; line-height: 1.6; }
+    .msg  { border-bottom: 1px solid #21262d; padding: 4px 0; }
+    .ts   { color: #8b949e; margin-right: 8px; }
+    button { margin-top: 12px; padding: 6px 16px; border-radius: 6px;
+             border: 1px solid #30363d; background: #21262d; color: #c9d1d9;
+             cursor: pointer; }
+    button:hover { background: #30363d; }
+  </style>
+</head>
+<body>
+  <h2>IoT Telemetry — Live Feed</h2>
+
+  <div id="status"><span class="wait">● Disconnected</span></div>
+
+  <div id="log"></div>
+
+  <button onclick="connect()" id="btn-connect">Connect</button>
+  <button onclick="disconnect()" id="btn-disconnect" disabled>Disconnect</button>
+  <button onclick="clearLog()">Clear</button>
+
+  <script>
+    let ws = null;
+
+    function connect() {
+      const url = 'ws://iot.local/ws/live';
+      setStatus('wait', `Connecting to ${url}…`);
+
+      ws = new WebSocket(url);
+
+      ws.onopen = () => {
+        setStatus('ok', `● Connected to ${url}`);
+        document.getElementById('btn-connect').disabled = true;
+        document.getElementById('btn-disconnect').disabled = false;
+        log('system', 'WebSocket connection established');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          log('sensor',
+            `SensorId: ${data.SensorId}  ` +
+            `Temp: ${data.Temperature}°C  ` +
+            `Time: ${new Date(data.Timestamp).toLocaleTimeString()}`
+          );
+        } catch {
+          log('raw', event.data);
+        }
+      };
+
+      ws.onerror = (e) => {
+        setStatus('err', '● Error — check console');
+        log('error', 'WebSocket error. Is NGINX Ingress running? Is iot.local in /etc/hosts?');
+      };
+
+      ws.onclose = (e) => {
+        setStatus('wait', `● Disconnected (code ${e.code})`);
+        document.getElementById('btn-connect').disabled = false;
+        document.getElementById('btn-disconnect').disabled = true;
+        log('system', `Connection closed: ${e.reason || 'no reason given'}`);
+        ws = null;
+      };
+    }
+
+    function disconnect() {
+      ws?.close(1000, 'User disconnected');
+    }
+
+    function setStatus(cls, text) {
+      document.getElementById('status').innerHTML =
+        `<span class="${cls}">${text}</span>`;
+    }
+
+    function log(type, text) {
+      const div = document.getElementById('log');
+      const entry = document.createElement('div');
+      entry.className = 'msg';
+      entry.innerHTML =
+        `<span class="ts">${new Date().toLocaleTimeString()}</span>` +
+        `<span>[${type}]</span> ${text}`;
+      div.appendChild(entry);
+      div.scrollTop = div.scrollHeight; // auto-scroll to latest
+    }
+
+    function clearLog() {
+      document.getElementById('log').innerHTML = '';
+    }
+  </script>
+</body>
+</html>
